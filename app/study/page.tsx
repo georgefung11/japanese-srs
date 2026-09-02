@@ -17,7 +17,7 @@ export default function StudyPage() {
     async function loadCards() {
       setLoading(true);
       const now = new Date().toISOString();
-      let items = await db.items.where("nextReviewDate").lte(now).toArray();
+      let items = await db.items.where("nextReviewDate").belowOrEqual(now).toArray();
 
       if (items.length === 0 && navigator.onLine) {
         const supabase = createClient();
