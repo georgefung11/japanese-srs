@@ -8,10 +8,16 @@ import Link from "next/link";
 import { handleLogout } from "@/lib/auth";
 
 export default function StudyPage() {
-  const [dueCards, setDueCards] = useState<LocalItem[]>([]);
+  const [cards, setCards] = useState<LocalItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showAnswer, setShowAnswer] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Test Mode States
+  const [isTestMode, setIsTestMode] = useState(false);
+  const [userAnswer, setUserAnswer] = useState("");
+  const [testFeedback, setTestFeedback] = useState<"correct" | "incorrect" | null>(null);
+  const [score, setScore] = useState({ correct: 0, total: 0 });
 
   useEffect(() => {
     async function loadCards() {
@@ -41,15 +47,69 @@ export default function StudyPage() {
         }
       }
 
-      setDueCards(items);
+      setCards(items);
       setLoading(false);
     }
 
     loadCards();
   }, []);
 
+  // Card Navigation Handlers
+  const handleNextCard = () => {
+    if (currentIndex < cards.length - 1) {
+      setCurrentIndex((prev) => prev + 1);
+      resetCardState();
+    }
+  };
+
+  const handlePrevCard = () => {
+    if (currentIndex > 0) {
+      setCurrentIndex((prev) => prev - 1);
+      resetCardState();
+    }
+  };
+
+  const resetCardState = () => {
+    setShowAnswer(false);
+    setUserAnswer("");
+    setTestFeedback(null);
+  };
+
+  const toggleTestMode = () => {
+    setIsTestMode(!isTestMode);
+    setScore({ correct: 0, total: 0 });
+    resetCardState();
+  };
+
+  // Test Answer Evaluation
+  const handleCheckTestAnswer = (e: React.FormEvent) => {
+    e.preventDefault();
+    const currentCard = cards[currentIndex];
+    if (!currentCard) return;
+
+    const normalizedUser = userAnswer.trim().toLowerCase();
+    const normalizedMeaning = currentCard.meaning.trim().toLowerCase();
+    const normalizedReading = currentCard.reading.trim().toLowerCase();
+
+    // Validates against meaning or reading accuracy
+    const isCorrect =
+      normalizedUser === normalizedMeaning ||
+      normalizedUser === normalizedReading ||
+      normalizedMeaning.includes(normalizedUser);
+
+    if (isCorrect) {
+      setTestFeedback("correct");
+      setScore((prev) => ({ ...prev, correct: prev.correct + 1, total: prev.total + 1 }));
+    } else {
+      setTestFeedback("incorrect");
+      setScore((prev) => ({ ...prev, total: prev.total + 1 }));
+    }
+    setShowAnswer(true);
+  };
+
+  // SRS Rating Submission
   const handleRating = async (rating: number) => {
-    const currentCard = dueCards[currentIndex];
+    const currentCard = cards[currentIndex];
     if (!currentCard) return;
 
     const sm2 = calculateSM2({
@@ -94,21 +154,26 @@ export default function StudyPage() {
       await db.pendingReviews.add(reviewPayload);
     }
 
-    setShowAnswer(false);
-    if (currentIndex + 1 < dueCards.length) {
-      setCurrentIndex(currentIndex + 1);
-    } else {
-      setDueCards([]);
-    }
+    handleNextCard();
   };
 
-  const current = dueCards[currentIndex];
+  const current = cards[currentIndex];
 
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="flex-1 flex flex-col min-h-screen bg-slate-950 text-white">
       <header className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/80 backdrop-blur">
         <h1 className="text-xl font-bold text-emerald-400">Japanese SRS</h1>
         <nav className="flex gap-4 text-sm items-center">
+          <button
+            onClick={toggleTestMode}
+            className={`px-3 py-1 rounded-lg font-semibold transition border ${
+              isTestMode
+                ? "bg-purple-900/50 border-purple-500 text-purple-300"
+                : "border-slate-700 text-slate-300 hover:text-white"
+            }`}
+          >
+            {isTestMode ? "Exit Test Mode" : "Start Test"}
+          </button>
           <Link href="/import" className="text-slate-300 hover:text-white">
             Import
           </Link>
@@ -130,7 +195,7 @@ export default function StudyPage() {
         ) : !current ? (
           <div className="text-center">
             <h2 className="text-2xl font-bold text-emerald-400 mb-2">
-              🎉 All Catch Up!
+              🎉 All Caught Up!
             </h2>
             <p className="text-slate-400 mb-6">No cards due for review right now.</p>
             <Link
@@ -141,53 +206,126 @@ export default function StudyPage() {
             </Link>
           </div>
         ) : (
-          <div className="w-full max-w-lg bg-slate-800 border border-slate-700 rounded-2xl p-8 flex flex-col items-center min-h-[350px] justify-between shadow-2xl">
-            <div className="text-center w-full">
-              <span className="text-xs font-semibold uppercase tracking-wider text-emerald-400 bg-emerald-950/60 border border-emerald-800 px-3 py-1 rounded-full">
-                {current.type} {current.jlpt_level && `• ${current.jlpt_level}`}
-              </span>
-              <h2 className="text-5xl font-extrabold mt-6 mb-2 text-white">
-                {current.japanese}
-              </h2>
-              {showAnswer && (
-                <div className="mt-6 border-t border-slate-700 pt-6 space-y-2 animate-fadeIn">
-                  <p className="text-xl text-emerald-300 font-medium">
-                    {current.reading}
-                  </p>
-                  <p className="text-lg text-slate-200">{current.meaning}</p>
-                  {current.example_sentence && (
-                    <p className="text-sm text-slate-400 italic mt-3 bg-slate-900/50 p-3 rounded-lg border border-slate-700/50">
-                      "{current.example_sentence}"
+          <div className="w-full max-w-lg flex flex-col gap-4">
+            {/* Header controls for Test Mode Score */}
+            {isTestMode && (
+              <div className="flex justify-between items-center px-2 text-sm text-slate-400">
+                <span>Memory Test Mode</span>
+                <span>
+                  Score: {score.correct} / {score.total}
+                </span>
+              </div>
+            )}
+
+            {/* Main Flashcard Body */}
+            <div className="w-full bg-slate-800 border border-slate-700 rounded-2xl p-8 flex flex-col items-center min-h-[360px] justify-between shadow-2xl">
+              <div className="text-center w-full">
+                <span className="text-xs font-semibold uppercase tracking-wider text-emerald-400 bg-emerald-950/60 border border-emerald-800 px-3 py-1 rounded-full">
+                  {current.type} {current.jlpt_level && `• ${current.jlpt_level}`}
+                </span>
+                <h2 className="text-5xl font-extrabold mt-6 mb-2 text-white">
+                  {current.japanese}
+                </h2>
+
+                {/* Test Mode Input Form */}
+                {isTestMode && !showAnswer && (
+                  <form onSubmit={handleCheckTestAnswer} className="mt-6 space-y-3">
+                    <input
+                      type="text"
+                      placeholder="Type reading or meaning..."
+                      value={userAnswer}
+                      onChange={(e) => setUserAnswer(e.target.value)}
+                      className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-purple-500"
+                      autoFocus
+                    />
+                    <button
+                      type="submit"
+                      className="w-full py-2 bg-purple-600 hover:bg-purple-500 font-semibold rounded-lg transition"
+                    >
+                      Submit Answer
+                    </button>
+                  </form>
+                )}
+
+                {/* Result Feedback Banner for Test Mode */}
+                {isTestMode && testFeedback && (
+                  <div
+                    className={`mt-4 p-2 rounded-lg text-sm font-bold ${
+                      testFeedback === "correct"
+                        ? "bg-emerald-950/80 border border-emerald-700 text-emerald-300"
+                        : "bg-red-950/80 border border-red-700 text-red-300"
+                    }`}
+                  >
+                    {testFeedback === "correct" ? "✓ Correct!" : "✗ Incorrect"}
+                  </div>
+                )}
+
+                {/* Answer Display Section */}
+                {showAnswer && (
+                  <div className="mt-6 border-t border-slate-700 pt-6 space-y-2 animate-fadeIn">
+                    <p className="text-xl text-emerald-300 font-medium">
+                      {current.reading}
                     </p>
-                  )}
+                    <p className="text-lg text-slate-200">{current.meaning}</p>
+                    {current.example_sentence && (
+                      <p className="text-sm text-slate-400 italic mt-3 bg-slate-900/50 p-3 rounded-lg border border-slate-700/50">
+                        "{current.example_sentence}"
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Standard Review Controls */}
+              {!isTestMode && !showAnswer && (
+                <button
+                  onClick={() => setShowAnswer(true)}
+                  className="w-full mt-8 py-3 bg-emerald-600 hover:bg-emerald-500 font-semibold rounded-xl text-lg transition shadow-lg"
+                >
+                  Show Answer
+                </button>
+              )}
+
+              {/* Standard SRS Rating Options */}
+              {!isTestMode && showAnswer && (
+                <div className="w-full mt-6 grid grid-cols-6 gap-2">
+                  {[0, 1, 2, 3, 4, 5].map((rating) => (
+                    <button
+                      key={rating}
+                      onClick={() => handleRating(rating)}
+                      className={`py-2 text-sm font-bold rounded-lg transition border ${
+                        rating < 3
+                          ? "bg-red-950/40 border-red-800 text-red-300 hover:bg-red-900/60"
+                          : "bg-emerald-950/40 border-emerald-800 text-emerald-300 hover:bg-emerald-900/60"
+                      }`}
+                    >
+                      {rating}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
 
-            {!showAnswer ? (
+            {/* Backward / Forward Card Flipping Controls */}
+            <div className="flex justify-between items-center text-sm">
               <button
-                onClick={() => setShowAnswer(true)}
-                className="w-full mt-8 py-3 bg-emerald-600 hover:bg-emerald-500 font-semibold rounded-xl text-lg transition shadow-lg"
+                onClick={handlePrevCard}
+                disabled={currentIndex === 0}
+                className="px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
               >
-                Show Answer
+                ← Previous
               </button>
-            ) : (
-              <div className="w-full mt-6 grid grid-cols-6 gap-2">
-                {[0, 1, 2, 3, 4, 5].map((rating) => (
-                  <button
-                    key={rating}
-                    onClick={() => handleRating(rating)}
-                    className={`py-2 text-sm font-bold rounded-lg transition border ${
-                      rating < 3
-                        ? "bg-red-950/40 border-red-800 text-red-300 hover:bg-red-900/60"
-                        : "bg-emerald-950/40 border-emerald-800 text-emerald-300 hover:bg-emerald-900/60"
-                    }`}
-                  >
-                    {rating}
-                  </button>
-                ))}
-              </div>
-            )}
+              <span className="text-slate-400 font-medium">
+                {currentIndex + 1} of {cards.length}
+              </span>
+              <button
+                onClick={handleNextCard}
+                disabled={currentIndex === cards.length - 1}
+                className="px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              >
+                Next →
+              </button>
+            </div>
           </div>
         )}
       </main>
